@@ -500,11 +500,14 @@ async fn ollama_fetch_model_details(
 }
 
 fn ollama_model_details(show: &OllamaShowResponse) -> OllamaModelDetails {
+    // An explicit `num_ctx` is what this model tag actually runs on; the
+    // architecture's `model_info.context_length` is its training maximum and
+    // loses to a declared cap.
     let context_window = show
-        .model_info
-        .as_ref()
-        .and_then(ollama_extract_context_length)
-        .or_else(|| show.parameters.as_deref().and_then(ollama_extract_num_ctx));
+        .parameters
+        .as_deref()
+        .and_then(ollama_extract_num_ctx)
+        .or_else(|| show.model_info.as_ref().and_then(ollama_extract_context_length));
 
     OllamaModelDetails {
         context_window,
@@ -991,7 +994,6 @@ mod tests {
 
         const PARSE_FAILED: &str = "failed to parse /api/show body";
         const CAPABILITIES_PLACEHOLDER: &str = "__CAPABILITIES__";
-        const CONTEXT_LENGTH: u32 = 128_000;
 
         /// Shaped like a real Ollama `POST /api/show` body, so a rename or a
         /// nesting change of any field discovery reads breaks these tests.
@@ -1026,7 +1028,8 @@ mod tests {
 
             let details = ollama_model_details(&show);
             assert_eq!(details.supports_vision, expected_vision);
-            assert_eq!(details.context_window, Some(CONTEXT_LENGTH));
+            // `num_ctx 2048` is declared and outranks the 128000 training window.
+            assert_eq!(details.context_window, Some(2048));
         }
     }
 
