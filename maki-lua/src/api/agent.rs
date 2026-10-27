@@ -49,7 +49,7 @@ use crate::api::util::convert::{TableExt, json_to_lua, lua_to_json, lua_tool_res
 use crate::api::util::ctx::{AgentContext, LuaCtx};
 use crate::api::util::pair::{Pair, err_pair, pair, try_pair};
 use crate::background::{BackgroundInfo, BackgroundSession, BackgroundSessions};
-use crate::plugin_permissions::{Permission, PluginPermissions, denied_error};
+use crate::plugin_permissions::{Permission, PluginPermissions, require};
 use crate::runtime::{CANCELLED_MSG, active_task_cancel, host_ui};
 
 const SESSION_CLOSED_ERR: &str = "session closed";
@@ -392,7 +392,13 @@ async fn system_prompt(
     ctx: mlua::UserDataRef<LuaCtx>,
     opts: Table,
 ) -> LuaResult<Pair<String>> {
-    let slots = Arc::clone(&try_pair!(dispatch_ctx(&ctx, "system_prompt")).prompt_slots);
+    let (slots, instructions_config) = {
+        let agent_ctx = try_pair!(dispatch_ctx(&ctx, "system_prompt"));
+        (
+            Arc::clone(&agent_ctx.prompt_slots),
+            agent_ctx.config.instructions.clone(),
+        )
+    };
     // Nothing may hold the ctx borrow across the wait: a cancel hook firing
     // meanwhile needs `ctx:finish`, which takes it mutably.
     drop(ctx);
@@ -409,7 +415,10 @@ async fn system_prompt(
     let instructions = match instructions_val {
         LuaValue::Boolean(true) => {
             let cwd = vars.apply("{cwd}").into_owned();
-            smol::unblock(move || maki_agent::agent::load_instruction_text(&cwd)).await
+            smol::unblock(move || {
+                maki_agent::agent::load_instruction_text(&cwd, &instructions_config)
+            })
+            .await
         }
         LuaValue::Boolean(false) | LuaValue::Nil => String::new(),
         LuaValue::String(s) => s.to_str()?.to_owned(),
@@ -755,9 +764,7 @@ async fn session(
             None,
         ),
         LuaEither::Right(opts) => {
-            if !perms.is_allowed(Permission::Agent) {
-                return Err(denied_error(Permission::Agent));
-            }
+            require(&lua, &perms, Permission::Agent)?;
             let Some((task, _)) = active_task_cancel(&lua) else {
                 return Ok(err_pair(TASK_REQUIRED_ERR));
             };
@@ -811,7 +818,12 @@ async fn session(
         None => vec![],
     };
     let reaches_mcp = mcp_enabled && agent_ctx.mcp.is_some();
-    try_pair!(delegated_reach(&lua, &perms, &tools_json, reaches_mcp));
+    try_pair!(delegated_reach(
+        &lua,
+        &perms.now(&lua),
+        &tools_json,
+        reaches_mcp
+    ));
 
     let mut local_map: HashMap<String, LocalTool> = HashMap::new();
     if let Some(tbl) = local_tools_tbl {
@@ -1005,6 +1017,7 @@ async fn session(
         history: History::new(Vec::new()),
         gauge: ContextGauge::default(),
         loaded_instructions: LoadedInstructions::new(),
+        instruction_files: Arc::clone(&agent_ctx.instruction_files),
         sub_event_tx,
         stream_guard: Some(stream_guard),
         child_cancel,
@@ -1251,6 +1264,7 @@ struct SessionState {
     /// this model never saw, and a per-run set would inject the same file on
     /// every turn.
     loaded_instructions: LoadedInstructions,
+    instruction_files: Arc<Vec<String>>,
     sub_event_tx: EventSender,
     /// Dropped on close, which ends the relay task. Tool contexts keep
     /// [`EventSender`] clones alive past the run, so the relay cannot key off
@@ -1548,7 +1562,7 @@ async fn prompt(
     )
     .with_reauth(s.reauth)
     .with_interrupt_source(Arc::clone(&s.inbox) as Arc<dyn maki_agent::InterruptSource>)
-    .with_loaded_instructions(s.loaded_instructions.clone())
+    .with_loaded_instructions(s.loaded_instructions.clone(), s.instruction_files.clone())
     .with_cancel(s.child_cancel.clone())
     .with_mcp(s.mcp.clone())
     .with_local_tools(Arc::clone(&s.local_tools));
