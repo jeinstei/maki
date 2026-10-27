@@ -500,14 +500,14 @@ async fn ollama_fetch_model_details(
 }
 
 fn ollama_model_details(show: &OllamaShowResponse) -> OllamaModelDetails {
-    // An explicit `num_ctx` is what this model tag actually runs on; the
-    // architecture's `model_info.context_length` is its training maximum and
-    // loses to a declared cap.
-    let context_window = show
-        .parameters
-        .as_deref()
-        .and_then(ollama_extract_num_ctx)
-        .or_else(|| show.model_info.as_ref().and_then(ollama_extract_context_length));
+    // Ollama runs at the declared `num_ctx`, capped at the training length: it
+    // refuses to load a model past its architecture maximum.
+    let num_ctx = show.parameters.as_deref().and_then(ollama_extract_num_ctx);
+    let trained = show.model_info.as_ref().and_then(ollama_extract_context_length);
+    let context_window = match (num_ctx, trained) {
+        (Some(declared), Some(max)) => Some(declared.min(max)),
+        (declared, trained) => declared.or(trained),
+    };
 
     OllamaModelDetails {
         context_window,
@@ -1030,6 +1030,20 @@ mod tests {
             assert_eq!(details.supports_vision, expected_vision);
             // `num_ctx 2048` is declared and outranks the 128000 training window.
             assert_eq!(details.context_window, Some(2048));
+        }
+
+        #[test]
+        fn caps_num_ctx_at_training_window() {
+            // A `num_ctx` above the training window still can't be served: Ollama
+            // caps the context at the architecture maximum, so discovery must
+            // report the smaller of the two.
+            let body = SHOW_BODY
+                .replace(CAPABILITIES_PLACEHOLDER, "")
+                .replace("num_ctx 2048", "num_ctx 200000");
+            let show: OllamaShowResponse = serde_json::from_str(&body).expect(PARSE_FAILED);
+
+            let details = ollama_model_details(&show);
+            assert_eq!(details.context_window, Some(128000));
         }
     }
 
