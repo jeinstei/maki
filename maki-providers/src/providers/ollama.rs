@@ -31,7 +31,8 @@ const THINKING_NOTE: &str = "Thinking is checked per model: Maki asks Ollama wha
      A model that reports no usable level is treated as not supporting thinking, and Maki sends nothing for it. \
      Thinking models snap their levels: `xhigh` or `max` sends the highest level Ollama reports, and `minimal` the lowest. \
      `adaptive` sends `medium`, the level this provider's dialect maps it to. `off` sends `\"none\"`. \
-     The picker only shows the levels the model reports; the wire still falls back \
+     The picker shows all levels; ones the model does not report are dimmed. \
+     The wire still falls back \
      (e.g. `high` on a model whose top is `medium` clamps to `medium`)";
 
 pub(crate) const SPEC: ProviderSpec = ProviderSpec {
