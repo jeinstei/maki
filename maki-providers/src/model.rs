@@ -698,6 +698,15 @@ impl Model {
         self.thinking_override == Some(ThinkingSupport::Required)
     }
 
+    /// What discovery reported about this model's effort levels, if any.
+    /// `Some` refines the declared dialect's supported levels; `None`
+    /// keeps the declaration. Mirrors the [`Self::supports_thinking`]
+    /// lookup keying by the builtin slug.
+    pub(crate) fn discovered_effort(&self) -> Option<ModelEffort> {
+        let spec = ProviderRegistry::for_slug(&self.provider)?;
+        model_registry::discovered(spec.slug, &self.id)?.effort
+    }
+
     /// The level `adaptive` is sent as for this model, or `None` where the
     /// API picks the depth itself. Such a level is all `adaptive` is here, so
     /// the ladder leaves the row out. Every provider answers on its spec row.

@@ -1268,7 +1268,16 @@ impl ThinkingConfig {
             ThinkingFallback::None => {}
             ThinkingFallback::Dialect(dialect) => {
                 if model.supports_thinking() {
-                    self.apply_reasoning_effort(body, dialect, model);
+                    // Discovery may list a wider level set than the declared
+                    // dialect, e.g. Ollama `xhigh`; narrow to what the model
+                    // reports and let the snap below find its name.
+                    let discovered = model.discovered_effort();
+                    let eff = discovered.as_ref();
+                    let effective = match eff {
+                        Some(eff) => eff.refine(dialect),
+                        None => dialect.clone(),
+                    };
+                    self.apply_reasoning_effort(body, &effective, model);
                 }
             }
             // The model has no way to spell this mode, so the budget field
@@ -2245,6 +2254,63 @@ mod tests {
         let mut body = json!({});
         ThinkingConfig::Off.apply_thinking(&mut body, &model, DIALECT);
         assert_eq!(body, expected);
+    }
+
+    /// Ollama `xhigh` is past the static dialect's ceiling, so the
+    /// `ModelInfo.effort` discovery row refines the dialect and lets the
+    /// level snap to it. The other `Off` and no-discovery shapes ride the
+    /// same path and keep their wire shape.
+    #[test_case(ThinkingConfig::Effort(Max), "xhigh" ; "max_snaps_to_discovered_xhigh")]
+    #[test_case(ThinkingConfig::Adaptive, "medium" ; "adaptive_keeps_declared_level")]
+    #[test_case(ThinkingConfig::Off, "none" ; "off_says_none_when_inherited")]
+    fn ollama_effort_discovery_refines_the_dialect(thinking: ThinkingConfig, expected: &str) {
+        use crate::model::{Model, ModelEffort, ModelInfo};
+
+        const MODEL_ID: &str = "wire-xhigh-discovered";
+        crate::model_registry::set_known_models(
+            "ollama",
+            vec![ModelInfo {
+                id: MODEL_ID.into(),
+                supports_thinking: Some(true),
+                effort: Some(ModelEffort {
+                    supported: [Low, Medium, High, XHigh].to_vec(),
+                    send_off: None,
+                }),
+                ..ModelInfo::default()
+            }],
+        );
+
+        let model = Model::from_spec(&format!("ollama/{MODEL_ID}")).unwrap();
+        let mut body = json!({});
+        thinking.apply_thinking(&mut body, &model, DIALECT);
+        assert_eq!(body["reasoning_effort"], expected);
+    }
+
+    /// A discovered row that says "no off string" must win over the dialect
+    /// default, otherwise the model keeps reasoning after the user asked it
+    /// to stop.
+    #[test]
+    fn ollama_effort_discovery_drops_the_off_string() {
+        use crate::model::{Model, ModelEffort, ModelInfo};
+
+        const MODEL_ID: &str = "wire-off-still-omitted";
+        crate::model_registry::set_known_models(
+            "ollama",
+            vec![ModelInfo {
+                id: MODEL_ID.into(),
+                supports_thinking: Some(true),
+                effort: Some(ModelEffort {
+                    supported: [Low, Medium, High].to_vec(),
+                    send_off: Some(false),
+                }),
+                ..ModelInfo::default()
+            }],
+        );
+
+        let model = Model::from_spec(&format!("ollama/{MODEL_ID}")).unwrap();
+        let mut body = json!({});
+        ThinkingConfig::Off.apply_thinking(&mut body, &model, DIALECT);
+        assert_eq!(body, json!({}));
     }
 
     /// The badge reads as whatever the session is set to, and stays quiet when
