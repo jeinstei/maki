@@ -178,7 +178,7 @@ Defaults: gpt-5.6-luna (weak), gpt-5.6-terra (medium), claude-opus-5 (strong)
 
 This provider talks the OpenAI-compatible `/v1` API, so it also works with llama.cpp's server, LocalAI, or anything else that speaks the same protocol. Just point `OLLAMA_HOST` to the right address (e.g. `http://localhost:8080` for llama.cpp).
 
-Thinking is checked per model: Maki asks Ollama what each model accepts and shows those levels in `/thinking`. A model that reports no usable level is treated as not supporting thinking, and Maki sends nothing for it. Thinking models snap their levels: `xhigh` or `max` sends the highest level Ollama reports, and `minimal` the lowest. `adaptive` sends `medium`, the level this provider's dialect maps it to. `off` sends `"none"`.
+Thinking is checked per model: Maki asks Ollama what each model accepts and shows those levels in `/thinking`. A model that reports no usable level is treated as not supporting thinking, and Maki sends nothing for it. Thinking models snap their levels: `xhigh` or `max` sends the highest level Ollama reports, and `minimal` the lowest. `adaptive` sends `medium`, the level this provider's dialect maps it to. `off` sends `"none"`. The picker only shows the levels the model reports; the wire still falls back (e.g. `high` on a model whose top is `medium` clamps to `medium`)
 
 ### LlamaCpp
 

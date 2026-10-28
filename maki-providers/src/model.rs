@@ -776,7 +776,12 @@ impl Model {
     /// Named thinking choices, cheapest first. Explicit wire-level names take
     /// precedence over the generic budget ladder and carry no invented token
     /// counts. Empty exactly when the model has no thinking support.
-    pub fn thinking_options(&self) -> Vec<ThinkingOption> {
+    ///
+    /// `narrow=true` additionally intersects the ladder with what discovery
+    /// reports the model accepts, so the picker only shows real rows.
+    /// `narrow=false` keeps the ladder as declared and lets the wire fall back
+    /// (e.g. `high` on a model whose top is `medium` clamps to `medium`).
+    pub fn thinking_options(&self, narrow: bool) -> Vec<ThinkingOption> {
         if !self.supports_thinking() {
             return Vec::new();
         }
@@ -784,6 +789,11 @@ impl Model {
             .effective_thinking_fields()
             .map(|(fields, _)| fields)
             .filter(|fields| !fields.levels.is_empty() || fields.adaptive.is_some());
+        let discovered: Option<Vec<Effort>> = if narrow {
+            self.discovered_effort().map(|e| e.supported)
+        } else {
+            None
+        };
         let max = self
             .max_thinking_budget()
             .unwrap_or(FALLBACK_MAX_THINKING_BUDGET);
@@ -799,12 +809,24 @@ impl Model {
                 Effort::ALL
                     .into_iter()
                     .filter(|level| declared.is_none_or(|fields| fields.levels.contains_key(level)))
+                    .filter(|level| {
+                        discovered
+                            .as_deref()
+                            .is_none_or(|supported| supported.is_empty() || supported.contains(level))
+                    })
                     .map(|level| ThinkingOption {
                         name: level.as_str(),
                         tokens: declared.is_none().then(|| level.budget(max)),
                     }),
             )
             .collect()
+    }
+
+    /// [`Self::thinking_options`] without narrowing: the whole ladder the
+    /// model or its dialect declares, for listings where a user-pinned level
+    /// must remain visible even when discovery would hide it.
+    pub fn thinking_options_full(&self) -> Vec<ThinkingOption> {
+        self.thinking_options(false)
     }
 
     /// This model carrying one request's output budget, leaving the declared
@@ -2020,7 +2042,8 @@ mod tests {
     #[test_case(ThinkingSupport::Yes, &LADDER ; "the_whole_ladder")]
     #[test_case(ThinkingSupport::Required, &LADDER[1..] ; "required_thinking_drops_off")]
     fn thinking_options_list_what_the_model_accepts(support: ThinkingSupport, expected: &[&str]) {
-        let options = ladder_model(support, Some(ROOMY_OUTPUT)).thinking_options();
+        let options = ladder_model(support, Some(ROOMY_OUTPUT))
+            .thinking_options_full();
         let names: Vec<&str> = options.iter().map(|option| option.name).collect();
         assert_eq!(names, expected);
     }
@@ -2037,7 +2060,7 @@ mod tests {
             ..ladder_model(ThinkingSupport::Yes, Some(ROOMY_OUTPUT))
         };
 
-        let options = model.thinking_options();
+        let options = model.thinking_options_full();
         let names: Vec<&str> = options.iter().map(|option| option.name).collect();
         let expected: Vec<&str> = LADDER
             .into_iter()
@@ -2076,10 +2099,76 @@ mod tests {
             .unwrap(),
         ));
 
-        let options = model.thinking_options();
+        let options = model.thinking_options_full();
         let names: Vec<&str> = options.iter().map(|option| option.name).collect();
         assert_eq!(names, expected);
         assert!(options.iter().all(|option| option.tokens.is_none()));
+    }
+
+    /// Discovery narrows the picker to the levels the model reports when the
+    /// UI asks for it (`narrow=true`), which hides levels a user pinned in a
+    /// `providers.toml` overlay. `off` is the picker's opt-out and never
+    /// narrows. `adaptive` is dropped where the model's reported levels are
+    /// all below the dialect's mapping for it, kept otherwise.
+    /// `thinking_options_full` returns the whole declared ladder and is what
+    /// every listing surfaces today.
+    #[test]
+    fn narrowing_narrows_to_the_discovered_levels_only_when_asked() {
+        use crate::model::ModelEffort;
+
+        model_registry::set_known_models(
+            "ollama",
+            vec![
+                ModelInfo {
+                    supports_thinking: Some(true),
+                    effort: Some(ModelEffort {
+                        supported: vec![Effort::Low, Effort::Medium],
+                        send_off: None,
+                    }),
+                    ..ModelInfo::id_only("narrower".into())
+                },
+                ModelInfo {
+                    supports_thinking: Some(true),
+                    effort: Some(ModelEffort {
+                        supported: vec![Effort::High, Effort::XHigh],
+                        send_off: None,
+                    }),
+                    ..ModelInfo::id_only("high-top".into())
+                },
+            ],
+        );
+
+        let narrowed = Model::from_spec("ollama/narrower")
+            .unwrap()
+            .thinking_options(true)
+            .into_iter()
+            .map(|o| o.name)
+            .collect::<Vec<_>>();
+        assert_eq!(narrowed, [THINKING_OFF, Effort::Low.as_str(), Effort::Medium.as_str()]);
+
+        let full = Model::from_spec("ollama/narrower")
+            .unwrap()
+            .thinking_options_full()
+            .into_iter()
+            .map(|o| o.name)
+            .collect::<Vec<_>>();
+        assert_eq!(full, LADDER.into_iter().collect::<Vec<_>>());
+
+        let high_top = Model::from_spec("ollama/high-top")
+            .unwrap()
+            .thinking_options(true)
+            .into_iter()
+            .map(|o| o.name)
+            .collect::<Vec<_>>();
+        assert_eq!(high_top, [THINKING_OFF, Effort::High.as_str(), Effort::XHigh.as_str()]);
+    }
+
+    /// Discovery populates `effort` only on the Ollama path, so narrowing
+    /// must be a no-op for a model without it, on any provider.
+    #[test]
+    fn narrowing_is_a_no_op_for_models_with_no_discovered_effort() {
+        let model = Model::from_spec("anthropic/claude-sonnet-4-5").unwrap();
+        assert_eq!(model.thinking_options(true), model.thinking_options_full());
     }
 
     #[test_case(json!({}) ; "empty_fields")]
@@ -2087,9 +2176,9 @@ mod tests {
     fn thinking_options_without_declared_levels_keep_budget_fallback(fields: Value) {
         let mut model = ladder_model(ThinkingSupport::Yes, Some(ROOMY_OUTPUT));
         model.provider = Arc::from("llama-cpp");
-        let expected = model.thinking_options();
+        let expected = model.thinking_options_full();
         model.thinking_fields = Some(Box::new(serde_json::from_value(fields).unwrap()));
-        assert_eq!(model.thinking_options(), expected);
+        assert_eq!(model.thinking_options_full(), expected);
     }
 
     #[test_case(ThinkingSupport::No, &[] ; "unsupported")]
@@ -2109,7 +2198,7 @@ mod tests {
             .unwrap(),
         ));
 
-        let options = model.thinking_options();
+        let options = model.thinking_options_full();
         let names: Vec<&str> = options.iter().map(|option| option.name).collect();
         assert_eq!(names, expected);
         assert!(options.iter().all(|option| option.tokens.is_none()));
@@ -2122,7 +2211,7 @@ mod tests {
         model.provider = Arc::from("ollama");
         model.thinking_fields = Some(Box::new(serde_json::from_value(fields).unwrap()));
 
-        let options = model.thinking_options();
+        let options = model.thinking_options_full();
         let names: Vec<&str> = options.iter().map(|option| option.name).collect();
         assert_eq!(names, [THINKING_OFF, THINKING_ADAPTIVE, level]);
         assert_eq!(
@@ -2142,7 +2231,7 @@ mod tests {
         levels: [u32; 6],
     ) {
         let tokens: Vec<Option<u32>> = ladder_model(ThinkingSupport::Yes, max_output_tokens)
-            .thinking_options()
+            .thinking_options_full()
             .into_iter()
             .map(|option| option.tokens)
             .collect();

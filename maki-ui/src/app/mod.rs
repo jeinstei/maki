@@ -891,7 +891,7 @@ impl App {
             "provider": model.provider.to_string(),
             "thinking": self.state.thinking.to_string(),
             "thinking_shown": self.state.thinking.shown(model).to_string(),
-            "thinking_options": model.thinking_options(),
+            "thinking_options": model.thinking_options_full(),
             "fast": self.state.fast,
             "supports_thinking": model.supports_thinking(),
             "supports_fast": model.supports_fast(),

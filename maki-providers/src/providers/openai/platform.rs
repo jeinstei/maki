@@ -948,7 +948,7 @@ mod tests {
             }],
         );
         assert!(model.effective_thinking_fields().is_none());
-        assert!(!model.thinking_options().is_empty());
+        assert!(!model.thinking_options_full().is_empty());
     }
 
     #[test_case(true, Some(ACCOUNT_ID), None, false, FastSupport::Pending ; "oauth_waits_for_discovery")]

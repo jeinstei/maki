@@ -2674,7 +2674,7 @@ mod tests {
         };
         assert_eq!(requested.clamped(&model), requested);
         assert_eq!(requested.shown(&model), expected);
-        assert!(!model.thinking_options().is_empty());
+        assert!(!model.thinking_options_full().is_empty());
 
         let ctx = RequestCtx {
             model: &model,
@@ -2758,7 +2758,7 @@ mod tests {
         assert_eq!(requested.clamped(&model), requested);
         assert!(
             model
-                .thinking_options()
+                .thinking_options_full()
                 .iter()
                 .any(|option| option.name == Effort::Low.as_str())
         );
@@ -2804,7 +2804,7 @@ mod tests {
 
                 let model = Model::from_spec(&format!("{slug}/{model_id}")).unwrap();
                 assert_eq!(model.effective_thinking_fields().is_some(), uses_fields);
-                let options = model.thinking_options();
+                let options = model.thinking_options_full();
                 assert!(!options.is_empty());
                 assert_eq!(options.iter().any(|o| o.name == "off"), !required);
                 let requested = ThinkingConfig::Effort(Effort::Low);
@@ -2832,7 +2832,7 @@ mod tests {
                 } else {
                     let mut without_fields = model.clone();
                     without_fields.thinking_fields = None;
-                    assert_eq!(options, without_fields.thinking_options());
+                    assert_eq!(options, without_fields.thinking_options_full());
                     for thinking in [requested, ThinkingConfig::Adaptive] {
                         assert_eq!(thinking.shown(&model), thinking.shown(&without_fields));
                     }
@@ -2881,11 +2881,11 @@ mod tests {
 
         let model = Model::from_spec(&format!("{THINKING_GATEWAY}/{model_id}")).unwrap();
         assert_eq!(model.effective_thinking_fields().is_some(), uses_fields);
-        assert!(!model.thinking_options().is_empty());
+        assert!(!model.thinking_options_full().is_empty());
         if uses_fields {
             assert_eq!(
                 model
-                    .thinking_options()
+                    .thinking_options_full()
                     .iter()
                     .map(|option| option.name)
                     .collect::<Vec<_>>(),
