@@ -137,6 +137,24 @@ impl ModelEffort {
         }
     }
 
+    /// Parse a raw `thinking` object, e.g. Ollama's
+    /// `{"values":[false,"low","medium","xhigh"],"default":"medium"}`.
+    /// `None` when the object is missing or malformed; an empty
+    /// `supported` plus `send_off` is a valid result for
+    /// `{"values":[false,true]}`.
+    pub fn from_thinking_block(thinking: Option<&Value>) -> Option<Self> {
+        let values = thinking
+            .and_then(|t| t.get("values"))
+            .and_then(Value::as_array)?;
+        Some(Self {
+            supported: Self::known_levels(values),
+            send_off: values
+                .iter()
+                .any(|v| matches!(v, Value::Bool(false)))
+                .then_some(true),
+        })
+    }
+
     /// What [`Self::supported`] keeps of the names a provider listed.
     fn known_levels(listed: &[Value]) -> Vec<Effort> {
         let mut efforts: Vec<Effort> = listed

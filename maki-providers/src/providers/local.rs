@@ -421,6 +421,7 @@ struct OllamaModelDetails {
     context_window: Option<u32>,
     supports_vision: Option<bool>,
     supports_thinking: bool,
+    effort: Option<crate::model::ModelEffort>,
 }
 
 impl LocalEndpoint {
@@ -462,7 +463,7 @@ impl LocalEndpoint {
                 tier: None,
                 provider_info: None,
                 extra: None,
-                effort: None,
+                effort: d.effort,
             })
             .collect();
         models.sort_by(|a, b| a.id.cmp(&b.id));
@@ -513,7 +514,21 @@ fn ollama_model_details(show: &OllamaShowResponse) -> OllamaModelDetails {
     OllamaModelDetails {
         context_window,
         supports_vision: ollama_extract_vision(show.capabilities.as_deref()),
-        supports_thinking: show.thinking.is_some(),
+        supports_thinking: ollama_supports_thinking(show),
+        effort: crate::model::ModelEffort::from_thinking_block(show.thinking.as_ref()),
+    }
+}
+
+/// Thinking needs a level an Ollama model actually accepts: `false` in
+/// `thinking.values` is the off switch, and a model listing only that cannot
+/// take one.
+fn ollama_supports_thinking(show: &OllamaShowResponse) -> bool {
+    match show.thinking.as_ref().and_then(|t| t["values"].as_array()) {
+        Some(values) => values.iter().any(|v| v != &Value::Bool(false)),
+        None => show
+            .capabilities
+            .as_deref()
+            .is_some_and(|c| c.iter().any(|c| c == "thinking")),
     }
 }
 
@@ -993,6 +1008,7 @@ mod tests {
         use test_case::test_case;
 
         use super::super::*;
+        use crate::model::ModelEffort;
 
         const PARSE_FAILED: &str = "failed to parse /api/show body";
         const CAPABILITIES_PLACEHOLDER: &str = "__CAPABILITIES__";
@@ -1028,30 +1044,63 @@ mod tests {
 "#;
         const THINKING_BOOLEAN: &str = r#""thinking": {"values":[false,true],"default":true},
 "#;
+        const THINKING_OFF_ONLY: &str = r#""thinking": {"values":[false],"default":false},
+"#;
+        const THINKING_NO_OFF: &str = r#""thinking": {"values":["low","high"],"default":"low"},
+"#;
 
         fn fill(body: &str, capabilities: &str, thinking: &str) -> String {
             body.replace(CAPABILITIES_PLACEHOLDER, capabilities)
                 .replace(THINKING_PLACEHOLDER, thinking)
         }
 
-        #[test_case(r#""capabilities": ["completion", "vision"],"#, "", Some(true), false  ; "vision_capability")]
-        #[test_case(r#""capabilities": ["completion", "tools"],"#, "", Some(false), false ; "no_vision_capability")]
-        #[test_case("", "", None, false ; "capabilities_omitted_by_old_server")]
-        #[test_case("", THINKING_NAMED, None, true ; "named_thinking_levels")]
-        #[test_case("", THINKING_BOOLEAN, None, true ; "boolean_thinking")]
-        #[test_case(r#""capabilities": ["completion", "vision"],"#, THINKING_NAMED, Some(true), true ; "vision_and_thinking")]
+        fn expected(supported: Vec<Effort>, send_off: Option<bool>) -> Option<ModelEffort> {
+            Some(ModelEffort {
+                supported,
+                send_off,
+            })
+        }
+
+        fn named_levels() -> Vec<Effort> {
+            vec![Effort::Low, Effort::Medium, Effort::XHigh]
+        }
+
+        const CAPS_VISION: &str = r#""capabilities": ["completion", "vision"],
+"#;
+        const CAPS_TOOLS: &str = r#""capabilities": ["completion", "tools"],
+"#;
+        const CAPS_THINKING: &str = r#""capabilities": ["completion", "thinking"],
+"#;
+
+        #[test_case("", "", false, None, None ; "no_thinking_no_vision")]
+        #[test_case(CAPS_VISION, "", false, None, Some(true) ; "vision_only")]
+        #[test_case(CAPS_TOOLS, "", false, None, Some(false) ; "no_vision_only")]
+        #[test_case(CAPS_THINKING, "", true, None, Some(false) ; "thinking_capability_without_values")]
+        #[test_case("", THINKING_NAMED, true, expected(named_levels(), Some(true)), None ; "named_thinking_levels")]
+        #[test_case("", THINKING_BOOLEAN, true, expected(Vec::new(), Some(true)), None ; "boolean_thinking")]
+        #[test_case("", THINKING_OFF_ONLY, false, expected(Vec::new(), Some(true)), None ; "off_only_thinking")]
+        #[test_case("", THINKING_NO_OFF, true, expected(vec![Effort::Low, Effort::High], None), None ; "levels_without_off")]
+        #[test_case(CAPS_VISION, THINKING_NAMED, true, expected(named_levels(), Some(true)), Some(true) ; "vision_and_thinking")]
         fn parses_details(
             capabilities_field: &str,
             thinking_field: &str,
-            expected_vision: Option<bool>,
             expected_thinking: bool,
+            expected_effort: Option<ModelEffort>,
+            expected_vision: Option<bool>,
         ) {
             let body = fill(SHOW_BODY, capabilities_field, thinking_field);
             let show: OllamaShowResponse = serde_json::from_str(&body).expect(PARSE_FAILED);
 
             let details = ollama_model_details(&show);
-            assert_eq!(details.supports_vision, expected_vision);
-            assert_eq!(details.supports_thinking, expected_thinking);
+            assert_eq!(
+                details.supports_thinking, expected_thinking,
+                "details for `{body}`"
+            );
+            assert_eq!(details.effort, expected_effort, "details for `{body}`");
+            assert_eq!(
+                details.supports_vision, expected_vision,
+                "details for `{body}`"
+            );
             assert_eq!(details.context_window, Some(CONTEXT_LENGTH));
         }
     }
