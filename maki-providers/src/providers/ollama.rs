@@ -27,6 +27,11 @@ const DISCOVERY_NOTE: &str = "This provider talks the OpenAI-compatible `/v1` AP
      Just point `OLLAMA_HOST` to the right address \
      (e.g. `http://localhost:8080` for llama.cpp).";
 
+const THINKING_NOTE: &str = "Thinking is checked per model: Maki asks Ollama what each model accepts and shows those levels in `/thinking`. \
+     A model that reports no usable level is offered no thinking at all, and Maki sends nothing for it. \
+     Thinking models snap their levels: `xhigh` or `max` sends the highest level Ollama reports, and `minimal` the lowest. \
+     `adaptive` sends `medium`, the level this provider's dialect maps it to. `off` sends `\"none\"`.";
+
 pub(crate) const SPEC: ProviderSpec = ProviderSpec {
     slug: OLLAMA.slug,
     display_name: OLLAMA.display_name,
@@ -63,7 +68,7 @@ pub(crate) const SPEC: ProviderSpec = ProviderSpec {
         features: Some(FEATURES),
         auth: AuthDoc::Custom(AUTH_DOC),
         catalog: CatalogDoc::Discovered(DISCOVERY_NOTE),
-        trailing_notes: &[],
+        trailing_notes: &[THINKING_NOTE],
     },
 };
 

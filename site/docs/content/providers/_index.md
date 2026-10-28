@@ -178,6 +178,8 @@ Defaults: gpt-5.6-luna (weak), gpt-5.6-terra (medium), claude-opus-5 (strong)
 
 This provider talks the OpenAI-compatible `/v1` API, so it also works with llama.cpp's server, LocalAI, or anything else that speaks the same protocol. Just point `OLLAMA_HOST` to the right address (e.g. `http://localhost:8080` for llama.cpp).
 
+Thinking is checked per model: Maki asks Ollama what each model accepts and shows those levels in `/thinking`. A model that reports no usable level is offered no thinking at all, and Maki sends nothing for it. Thinking models snap their levels: `xhigh` or `max` sends the highest level Ollama reports, and `minimal` the lowest. `adaptive` sends `medium`, the level this provider's dialect maps it to. `off` sends `"none"`.
+
 ### LlamaCpp
 
 - **Env var**: `LLAMA_CPP_API_KEY`
@@ -469,7 +471,7 @@ high = { reasoning_effort = "xhigh" }
 max = { reasoning_effort = "xhigh" }
 ```
 
-A mode you left out sends nothing. To get Ollama's own effort words (`low`, `medium`, `high`, and `none` when thinking is off) instead of writing every fragment yourself, use the built-in `ollama` slug: set `[ollama].base_url` (or `OLLAMA_HOST`) and give `[[ollama.models]]` the thinking keys. Only `supports_thinking`, `requires_thinking` and `thinking_fields` overlay onto a built-in slug. The rest of the entry stays ignored, and startup names the keys it dropped.
+A mode you left out sends nothing. The built-in `ollama` slug needs no `thinking_fields` of its own: it reads the levels from `ollama show` for each model and snaps them to Ollama's own effort words, so `high` on a model that lists `xhigh` as its top level sends `"xhigh"`. A `providers.toml` overlay still overrides per model: add `[[ollama.models]]` with `supports_thinking`, `requires_thinking`, or explicit `thinking_fields`, and those keys win. Only those keys overlay onto a built-in slug. The rest of the entry stays ignored, and startup names the keys it dropped.
 
 Without `thinking_fields`, maki sends `"thinking": {"type": "disabled"}` when thinking is off and nothing when it is on. GLM and Kimi gateways need this block to stop reasoning. Declaring `thinking_fields` replaces it, so add an `off` key if your gateway needs one. Some gateways, such as LiteLLM in front of Azure, reject the block. Maki then retries without it, and if the retry works, leaves the block out for that model until restart.
 
