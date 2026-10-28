@@ -217,7 +217,7 @@ supports_vision = false
 
 Custom slugs must not reuse a built-in provider name. Maki exits with code 2 at startup if `providers.toml` does not parse or contains an unknown key, so a typo like `api_key_evn` fails there rather than being silently ignored.
 
-Custom `openai`-protocol models control thinking with `thinking_fields`. Each key is a thinking mode, and its JSON fragment merges into the request body. An effort level without a key uses the closest declared level below it, or the lowest declared level if none is below. `off` and `adaptive` need their own keys and never fall back:
+Custom `openai`-protocol models control thinking with `thinking_fields`. Each key is a thinking mode, and its JSON fragment merges into the request body. An effort level without a key uses the closest declared level below it, or the lowest declared level if none is below. A mode you left out of the thinking_fields list will send nothing. `off` and `adaptive` need their own keys and never fall back:
 
 ```toml
 [[my-ollama.models]]
@@ -233,7 +233,7 @@ high = {{ reasoning_effort = "xhigh" }}
 max = {{ reasoning_effort = "xhigh" }}
 ```
 
-A mode you left out sends nothing. The built-in `ollama` slug needs no `thinking_fields` of its own: it reads the levels from `ollama show` for each model and snaps them to Ollama's own effort words, so `high` on a model that lists `xhigh` as its top level sends `"xhigh"`. A `providers.toml` overlay still overrides per model: add `[[ollama.models]]` with `supports_thinking`, `requires_thinking`, or explicit `thinking_fields`, and those keys win. Only those keys overlay onto a built-in slug. The rest of the entry stays ignored, and startup names the keys it dropped.
+ The built-in `ollama` slug needs no `thinking_fields` of its own: it reads the levels from `ollama show` for each model and snaps them to Ollama's own effort words, so `high` on a model that lists `xhigh` as its top level sends `"xhigh"`. A `providers.toml` overlay still overrides per model: add `[[ollama.models]]` with `supports_thinking`, `requires_thinking`, or explicit `thinking_fields`, and those keys are used instead. Only those keys will overlay onto the model.
 
 Without `thinking_fields`, maki sends `"thinking": {{"type": "disabled"}}` when thinking is off and nothing when it is on. GLM and Kimi gateways need this block to stop reasoning. Declaring `thinking_fields` replaces it, so add an `off` key if your gateway needs one. Some gateways, such as LiteLLM in front of Azure, reject the block. Maki then retries without it, and if the retry works, leaves the block out for that model until restart.
 
