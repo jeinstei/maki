@@ -1802,6 +1802,26 @@ mod tests {
     }
 
     #[test]
+    fn discovered_thinking_flows_into_ollama_model() {
+        use crate::model::ModelInfo;
+
+        model_registry::set_known_models(
+            "ollama",
+            vec![
+                ModelInfo {
+                    supports_thinking: Some(true),
+                    ..ModelInfo::id_only("test-thinker".into())
+                },
+                ModelInfo::id_only("test-thinkless".into()),
+            ],
+        );
+
+        let thinking = |id| Model::from_spec(id).unwrap().supports_thinking();
+        assert!(thinking("ollama/test-thinker"));
+        assert!(!thinking("ollama/test-thinkless"));
+    }
+
+    #[test]
     fn discovered_context_window_flows_into_from_base_for_unknown_model() {
         use crate::model::ModelInfo;
 
